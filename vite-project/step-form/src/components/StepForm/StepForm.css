@@ -300,3 +300,23 @@
     gap: 10px;
   }
 }
+
+/* Redux debug panel */
+.redux-debug-panel {
+  margin-top: 20px;
+  padding: 15px;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+}
+
+.redux-debug-panel.success {
+  background-color: #e8f5e9;
+  border: 1px solid #4caf50;
+}
+
+.redux-debug-panel pre {
+  margin: 10px 0;
+  font-size: 12px;
+  overflow: auto;
+  max-height: 200px;
+}
