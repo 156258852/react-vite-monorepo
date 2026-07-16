@@ -1,40 +1,22 @@
+import { useSelector } from 'react-redux';
 import FormItem from './FormItem';
-import { useReduxStepForm } from '../../hooks/useReduxStepForm';
-
-const validators = {
-  firstName: (value) => {
-    if (!value) return '请输入姓名';
-    if (value.length < 2) return '姓名至少2个字符';
-    return null;
-  },
-  lastName: (value) => {
-    if (!value) return '请输入姓氏';
-    return null;
-  },
-  age: (value) => {
-    if (!value) return '请输入年龄';
-    if (Number(value) < 18) return '年龄必须大于18岁';
-    if (Number(value) > 120) return '年龄不能超过120岁';
-    return null;
-  },
-  gender: (value) => {
-    if (!value) return '请选择性别';
-    return null;
-  },
-  genderDescription: (value) => {
-    if (!value) return '请输入性别说明';
-    return null;
-  },
-};
-
-const conditionalFields = {
-  genderDescription: (data) => data.gender === 'other',
-};
+import { useStepForm } from '../../hooks/useStepForm';
 
 const Step0 = () => {
-  const { stepData, errors, handleChange, goToNext } = useReduxStepForm(0, validators, {
-    conditionalFields,
-  });
+  const stepData = useSelector(state => state.form.formData.step0);
+  const { errors, fieldProps, setFieldValue, goToNext } = useStepForm(
+    0,
+    {},
+    stepData
+  );
+
+  const handleGenderChange = e => {
+    const value = e.target.value;
+    setFieldValue('gender', value);
+    if (value !== 'other') {
+      setFieldValue('genderDescription', '');
+    }
+  };
 
   return (
     <div className="step-content">
@@ -47,35 +29,47 @@ const Step0 = () => {
         <FormItem label="姓名" required error={errors.firstName}>
           <input
             type="text"
-            value={stepData.firstName || ''}
-            onChange={handleChange('firstName')}
-            className={errors.firstName ? 'error' : ''}
+            {...fieldProps('firstName', {
+              rules: value => {
+                if (!value) return '请输入姓名';
+                if (value.length < 2) return '姓名至少2个字符';
+              },
+            })}
           />
         </FormItem>
 
         <FormItem label="姓氏" required error={errors.lastName}>
           <input
             type="text"
-            value={stepData.lastName || ''}
-            onChange={handleChange('lastName')}
-            className={errors.lastName ? 'error' : ''}
+            {...fieldProps('lastName', {
+              rules: value => {
+                if (!value) return '请输入姓氏';
+              },
+            })}
           />
         </FormItem>
 
         <FormItem label="年龄" required error={errors.age}>
           <input
             type="number"
-            value={stepData.age || ''}
-            onChange={handleChange('age')}
-            className={errors.age ? 'error' : ''}
+            {...fieldProps('age', {
+              rules: value => {
+                if (!value) return '请输入年龄';
+                if (Number(value) < 18) return '年龄必须大于18岁';
+                if (Number(value) > 120) return '年龄不能超过120岁';
+              },
+            })}
           />
         </FormItem>
 
         <FormItem label="性别" required error={errors.gender}>
           <select
-            value={stepData.gender || ''}
-            onChange={handleChange('gender')}
-            className={errors.gender ? 'error' : ''}
+            {...fieldProps('gender', {
+              rules: value => {
+                if (!value) return '请选择性别';
+              },
+              onChange: handleGenderChange,
+            })}
           >
             <option value="">请选择</option>
             <option value="male">男</option>
@@ -88,10 +82,12 @@ const Step0 = () => {
           <FormItem label="性别说明" required error={errors.genderDescription}>
             <input
               type="text"
-              value={stepData.genderDescription || ''}
-              onChange={handleChange('genderDescription')}
               placeholder="请说明您的性别"
-              className={errors.genderDescription ? 'error' : ''}
+              {...fieldProps('genderDescription', {
+                rules: value => {
+                  if (!value) return '请输入性别说明';
+                },
+              })}
             />
           </FormItem>
         )}
@@ -104,7 +100,7 @@ const Step0 = () => {
 
       <div className="step-form-actions">
         <div></div>
-        <button className="btn btn-primary" onClick={goToNext}>
+        <button className="btn btn-primary" onClick={() => goToNext()}>
           下一步
         </button>
       </div>

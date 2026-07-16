@@ -1,3 +1,7 @@
 packages:
   - 'vite-project/*'
   - 'packages/*'
+allowBuilds:
+  '@parcel/watcher': set this to true or false
+  '@swc/core': set this to true or false
+  esbuild: set this to true or false

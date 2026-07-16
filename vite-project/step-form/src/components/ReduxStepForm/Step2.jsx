@@ -1,20 +1,21 @@
+import { useSelector } from 'react-redux';
 import FormItem from './FormItem';
-import { useReduxStepForm } from '../../hooks/useReduxStepForm';
+import { useStepForm } from '../../hooks/useStepForm';
 
 const validators = {
-  province: (value) => {
+  province: value => {
     if (!value) return '请输入省份';
     return null;
   },
-  city: (value) => {
+  city: value => {
     if (!value) return '请输入城市';
     return null;
   },
-  street: (value) => {
+  street: value => {
     if (!value) return '请输入街道地址';
     return null;
   },
-  zipCode: (value) => {
+  zipCode: value => {
     if (value && !/^\d{6}$/.test(value)) {
       return '请输入6位数字邮编';
     }
@@ -23,9 +24,11 @@ const validators = {
 };
 
 const Step2 = () => {
-  const { stepData, errors, handleChange, goToNext, goToPrev } = useReduxStepForm(
+  const stepData = useSelector(state => state.form.formData.step2);
+  const { errors, handleChange, goToNext, goToPrev } = useStepForm(
     2,
-    validators
+    validators,
+    stepData
   );
 
   return (
@@ -76,10 +79,10 @@ const Step2 = () => {
       </div>
 
       <div className="step-form-actions">
-        <button className="btn btn-secondary" onClick={goToPrev}>
+        <button className="btn btn-secondary" onClick={() => goToPrev()}>
           上一步
         </button>
-        <button className="btn btn-primary" onClick={goToNext}>
+        <button className="btn btn-primary" onClick={() => goToNext()}>
           下一步
         </button>
       </div>

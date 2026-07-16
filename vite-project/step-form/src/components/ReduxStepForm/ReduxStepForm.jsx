@@ -10,7 +10,8 @@ const STEPS = [Step0, Step1, Step2, Step3];
 
 const ReduxStepForm = () => {
   const currentStep = useSelector(state => state.form.currentStep);
-  const CurrentStep = STEPS[currentStep];
+  const safeStep = STEPS[currentStep] ? currentStep : 0;
+  const CurrentStep = STEPS[safeStep];
 
   return (
     <div className="step-form">
