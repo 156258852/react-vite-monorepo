@@ -13,7 +13,7 @@ import { useFormValidation } from './useFormValidation';
  * @param {Object} stepData - Current step's form data (passed in by caller)
  * @returns {Object} Form state, handlers, and validation helpers
  */
-export const useStepForm = (stepNumber, validators, stepData = {}) => {
+export const useStepForm = (stepNumber, validators = {}, stepData = {}) => {
   const dispatch = useDispatch();
 
   const {

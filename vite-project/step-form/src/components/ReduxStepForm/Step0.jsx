@@ -6,7 +6,6 @@ const Step0 = () => {
   const stepData = useSelector(state => state.form.formData.step0);
   const { errors, fieldProps, setFieldValue, goToNext } = useStepForm(
     0,
-    {},
     stepData
   );
 
