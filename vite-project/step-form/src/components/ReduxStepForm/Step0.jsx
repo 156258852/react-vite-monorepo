@@ -1,13 +1,18 @@
-import { useSelector } from 'react-redux';
 import FormItem from './FormItem';
-import { useStepForm } from '../../hooks/useStepForm';
+import { useFormContext } from '../../hooks';
 
 const Step0 = () => {
-  const stepData = useSelector(state => state.form.formData.step0);
-  const { errors, fieldProps, setFieldValue, goToNext } = useStepForm(
-    0,
-    stepData
-  );
+  const {
+    stepErrors,
+    fieldProps,
+    setFieldValue,
+    goToNext,
+    watch,
+    getValues,
+    currentKey,
+  } = useFormContext();
+
+  const gender = watch('gender');
 
   const handleGenderChange = e => {
     const value = e.target.value;
@@ -25,7 +30,7 @@ const Step0 = () => {
       </p>
 
       <div className="form-grid">
-        <FormItem label="姓名" required error={errors.firstName}>
+        <FormItem label="姓名" required error={stepErrors.firstName}>
           <input
             type="text"
             {...fieldProps('firstName', {
@@ -37,7 +42,7 @@ const Step0 = () => {
           />
         </FormItem>
 
-        <FormItem label="姓氏" required error={errors.lastName}>
+        <FormItem label="姓氏" required error={stepErrors.lastName}>
           <input
             type="text"
             {...fieldProps('lastName', {
@@ -48,7 +53,7 @@ const Step0 = () => {
           />
         </FormItem>
 
-        <FormItem label="年龄" required error={errors.age}>
+        <FormItem label="年龄" required error={stepErrors.age}>
           <input
             type="number"
             {...fieldProps('age', {
@@ -61,7 +66,7 @@ const Step0 = () => {
           />
         </FormItem>
 
-        <FormItem label="性别" required error={errors.gender}>
+        <FormItem label="性别" required error={stepErrors.gender}>
           <select
             {...fieldProps('gender', {
               rules: value => {
@@ -77,8 +82,12 @@ const Step0 = () => {
           </select>
         </FormItem>
 
-        {stepData.gender === 'other' && (
-          <FormItem label="性别说明" required error={errors.genderDescription}>
+        {gender === 'other' && (
+          <FormItem
+            label="性别说明"
+            required
+            error={stepErrors.genderDescription}
+          >
             <input
               type="text"
               placeholder="请说明您的性别"
@@ -93,8 +102,8 @@ const Step0 = () => {
       </div>
 
       <div className="redux-debug-panel">
-        <strong>当前 Redux 数据：</strong>
-        <pre>{JSON.stringify(stepData, null, 2)}</pre>
+        <strong>当前数据：</strong>
+        <pre>{JSON.stringify(getValues()[currentKey], null, 2)}</pre>
       </div>
 
       <div className="step-form-actions">

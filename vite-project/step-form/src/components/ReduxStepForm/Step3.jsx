@@ -1,21 +1,18 @@
-import { useSelector, useDispatch } from 'react-redux';
-import { resetForm, goToStep } from '../../store/formSlice';
+import { useFormContext } from '../../hooks';
 
 const Step3 = () => {
-  const dispatch = useDispatch();
-  const formData = useSelector(state => state.form.formData);
+  const { getValues, getFieldValue, goTo, reset } = useFormContext();
 
   const handleSubmit = () => {
-    console.log('提交数据:', formData);
-    alert('表单提交成功！请查看控制台输出。\n\n' + JSON.stringify(formData, null, 2));
-    dispatch(resetForm());
+    const allData = getValues();
+    console.log('提交数据:', allData);
+    alert(
+      '表单提交成功！请查看控制台输出。\n\n' + JSON.stringify(allData, null, 2)
+    );
+    reset();
   };
 
-  const handlePrev = () => {
-    dispatch(goToStep(2));
-  };
-
-  const getGenderText = (gender) => {
+  const getGenderText = gender => {
     const map = { male: '男', female: '女', other: '其他' };
     return map[gender] || '未填写';
   };
@@ -28,13 +25,14 @@ const Step3 = () => {
         <h3>个人信息</h3>
         <div className="info-grid">
           <div className="info-item">
-            <strong>姓名:</strong> {formData.step0?.firstName || '未填写'} {formData.step0?.lastName || ''}
+            <strong>姓名:</strong> {getFieldValue(0, 'firstName') || '未填写'}{' '}
+            {getFieldValue(0, 'lastName') || ''}
           </div>
           <div className="info-item">
-            <strong>年龄:</strong> {formData.step0?.age || '未填写'}
+            <strong>年龄:</strong> {getFieldValue(0, 'age') || '未填写'}
           </div>
           <div className="info-item">
-            <strong>性别:</strong> {getGenderText(formData.step0?.gender)}
+            <strong>性别:</strong> {getGenderText(getFieldValue(0, 'gender'))}
           </div>
         </div>
       </div>
@@ -43,10 +41,10 @@ const Step3 = () => {
         <h3>联系方式</h3>
         <div className="info-grid">
           <div className="info-item">
-            <strong>邮箱:</strong> {formData.step1?.email || '未填写'}
+            <strong>邮箱:</strong> {getFieldValue(1, 'email') || '未填写'}
           </div>
           <div className="info-item">
-            <strong>手机号:</strong> {formData.step1?.phone || '未填写'}
+            <strong>手机号:</strong> {getFieldValue(1, 'phone') || '未填写'}
           </div>
         </div>
       </div>
@@ -55,27 +53,27 @@ const Step3 = () => {
         <h3>地址信息</h3>
         <div className="info-grid">
           <div className="info-item">
-            <strong>省份:</strong> {formData.step2?.province || '未填写'}
+            <strong>省份:</strong> {getFieldValue(2, 'province') || '未填写'}
           </div>
           <div className="info-item">
-            <strong>城市:</strong> {formData.step2?.city || '未填写'}
+            <strong>城市:</strong> {getFieldValue(2, 'city') || '未填写'}
           </div>
           <div className="info-item">
-            <strong>街道:</strong> {formData.step2?.street || '未填写'}
+            <strong>街道:</strong> {getFieldValue(2, 'street') || '未填写'}
           </div>
           <div className="info-item">
-            <strong>邮编:</strong> {formData.step2?.zipCode || '未填写'}
+            <strong>邮编:</strong> {getFieldValue(2, 'zipCode') || '未填写'}
           </div>
         </div>
       </div>
 
       <div className="redux-debug-panel success">
         <strong>完整提交数据：</strong>
-        <pre>{JSON.stringify(formData, null, 2)}</pre>
+        <pre>{JSON.stringify(getValues(), null, 2)}</pre>
       </div>
 
       <div className="step-form-actions">
-        <button className="btn btn-secondary" onClick={handlePrev}>
+        <button className="btn btn-secondary" onClick={() => goTo(2)}>
           上一步
         </button>
         <button className="btn btn-success" onClick={handleSubmit}>

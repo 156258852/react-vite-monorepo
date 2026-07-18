@@ -1,171 +1,328 @@
-import { useDispatch } from 'react-redux';
-import { useCallback, useRef } from 'react';
-import { updateField, goToStep } from '../store/formSlice';
-import { useFormValidation } from './useFormValidation';
+import { useState, useCallback, useRef } from 'react';
+import { useForceUpdate } from './useForceUpdate';
+import { useStepNavigation } from './useStepNavigation';
 
 /**
- * Custom hook for step form with Redux dispatch
- * Combines validation logic with field update and navigation
- * Note: stepData is caller-provided, mutations go through Redux dispatch
+ * Custom hook for step form (uncontrolled)
+ * Values stored in refs — no re-render on every keystroke
+ * Use watch(field) for values that drive UI (conditional rendering)
  *
- * @param {number} stepNumber - Current step number (0, 1, 2, etc.)
- * @param {Object} validators - Validation functions for each field (can be empty, use fieldProps rules instead)
- * @param {Object} stepData - Current step's form data (passed in by caller)
+ * @param {Object} options - Configuration
+ * @param {number} [options.totalSteps] - Total number of steps (generates step0, step1, ...)
+ * @param {string[]} [options.stepKeys] - Custom step keys (overrides totalSteps)
+ * @param {Object} [options.initialData] - Initial form data across all steps
+ * @param {boolean} [options.validateOnBlur=true] - Global default for blur validation
  * @returns {Object} Form state, handlers, and validation helpers
  */
-export const useStepForm = (stepNumber, validators = {}, stepData = {}) => {
-  const dispatch = useDispatch();
-
+export const useStepForm = (options = {}) => {
+  // ─── Config & Keys ───────────────────────────────────────────
   const {
-    errors,
-    setErrors,
-    clearFieldError,
-    maybeClearError,
-    setFieldErrors,
-    hasErrors,
-  } = useFormValidation(validators);
+    totalSteps,
+    stepKeys: customKeys,
+    initialData = {},
+    validateOnBlur = true,
+  } = options;
 
-  // Keep latest stepData in a ref so handleChange always sees fresh data
-  // even when multiple change events fire before re-render
-  const stepDataRef = useRef(stepData);
-  stepDataRef.current = stepData;
+  if (!customKeys && !totalSteps) {
+    throw new Error('useStepForm: 必须提供 totalSteps 或 stepKeys');
+  }
 
-  // Collect field-level rules registered via fieldProps(field, { rules })
-  // These are merged with global validators: field-level overrides global
+  const stepKeys =
+    customKeys || Array.from({ length: totalSteps }, (_, i) => `step${i}`);
+  const stepCount = stepKeys.length;
+
+  const buildInitial = () => {
+    const data = {};
+    stepKeys.forEach(key => {
+      data[key] = { ...(initialData[key] || {}) };
+    });
+    return data;
+  };
+
+  // ─── State & Refs ────────────────────────────────────────────
+  // Step navigation (delegated to useStepNavigation)
+  const {
+    currentStep,
+    currentStepRef,
+    goTo: rawGoTo,
+    reset: navReset,
+  } = useStepNavigation(stepCount);
+
+  const currentKey = stepKeys[currentStep];
+
+  // Errors namespaced by step key: { [stepKey]: { [field]: message } }
+  const [errors, setErrors] = useState({});
+
+  // Form values (ref = no re-render on change)
+  const valuesRef = useRef(buildInitial());
+  const initialDataRef = useRef(buildInitial());
+
+  // DOM input refs for programmatic updates
+  const inputRefs = useRef({});
+
+  // Watch mechanism: watched fields trigger re-render on change
+  const watchedFieldsRef = useRef(new Set());
+  const forceRender = useForceUpdate();
+
+  // Field rules namespaced by step key: { [stepKey]: { [field]: fn } }
   const fieldRulesRef = useRef({});
 
-  /**
-   * Get merged validators: global validators + field-level rules
-   */
-  const getMergedValidators = useCallback(() => ({
-    ...validators,
-    ...fieldRulesRef.current,
-  }), [validators]);
+  // Stale closure prevention refs
+  const stepKeysRef = useRef(stepKeys);
+  stepKeysRef.current = stepKeys;
+  const validateOnBlurRef = useRef(validateOnBlur);
+  validateOnBlurRef.current = validateOnBlur;
 
-  /**
-   * Set a field's value directly (core logic, no event parsing)
-   */
-  const setFieldValue = useCallback(
-    (field, value) => {
-      // Update Redux store
-      dispatch(updateField({ step: stepNumber, field, value }));
+  // ─── Internal Helpers ────────────────────────────────────────
 
-      // Clear error if field is now valid
-      const newData = { ...stepDataRef.current, [field]: value };
-      maybeClearError(field, value, newData);
-    },
-    [dispatch, stepNumber, maybeClearError]
+  /** Resolve step param (index / key / null=current) to step key */
+  const resolveKey = useCallback(step => {
+    if (step == null) return stepKeysRef.current[currentStepRef.current];
+    return typeof step === 'number' ? stepKeysRef.current[step] : step;
+  }, []);
+
+  /** Set or clear a single field's error (falsy error = clear) */
+  const setFieldError = useCallback((key, field, error) => {
+    setErrors(prev => {
+      if (error) {
+        return { ...prev, [key]: { ...prev[key], [field]: error } };
+      }
+      const stepErrors = prev[key];
+      if (!stepErrors || !stepErrors[field]) return prev;
+      const { [field]: _, ...rest } = stepErrors;
+      return { ...prev, [key]: rest };
+    });
+  }, []);
+
+  // ─── Value Operations ────────────────────────────────────────
+
+  /** Get all form values (snapshot from ref) */
+  const getValues = useCallback(() => valuesRef.current, []);
+
+  /** Get a field value from any step */
+  const getFieldValue = useCallback(
+    (step, field) => valuesRef.current[resolveKey(step)]?.[field],
+    [resolveKey]
   );
 
-  /**
-   * Convenience wrapper: extracts e.target.value for native inputs
-   */
+  /** Set a field's value (updates ref + DOM, no re-render unless watched) */
+  const setFieldValue = useCallback(
+    (field, value) => {
+      const key = resolveKey();
+      valuesRef.current[key] = { ...valuesRef.current[key], [field]: value };
+
+      // Update DOM input if mounted
+      const inputKey = `${key}.${field}`;
+      const el = inputRefs.current[inputKey];
+      if (el) el.value = value;
+
+      // Re-render if field is watched
+      if (watchedFieldsRef.current.has(inputKey)) {
+        forceRender();
+      }
+
+      // Clear error if field is now valid
+      const rule = fieldRulesRef.current[key]?.[field];
+      if (rule && !rule(value)) {
+        setFieldError(key, field, null);
+      }
+    },
+    [resolveKey, setFieldError]
+  );
+
+  /** Convenience wrapper: extracts value from native inputs */
   const handleChange = useCallback(
-    field => e => setFieldValue(field, e.target.value),
+    field => e => {
+      let val;
+      if (e && e.target) {
+        const { type, checked, value } = e.target;
+        val = type === 'checkbox' ? checked : value;
+      } else {
+        val = e;
+      }
+      setFieldValue(field, val);
+    },
     [setFieldValue]
   );
 
-  /**
-   * Validate a single field and set/clear its error
-   * Uses merged validators (global + field-level rules)
-   * Curried: validateField('email')
-   */
+  // ─── Validation ──────────────────────────────────────────────
+
+  /** Validate a single field and set/clear its error. Curried: validateField('email')() */
   const validateField = useCallback(
     field => () => {
-      const merged = getMergedValidators();
-      const rule = merged[field];
+      const key = resolveKey();
+      const rule = fieldRulesRef.current[key]?.[field];
       if (!rule) return true;
 
-      const value = stepDataRef.current[field];
+      const value = valuesRef.current[key]?.[field];
       const error = rule(value);
-      if (error) {
-        setFieldErrors({ [field]: error });
-      } else {
-        clearFieldError(field);
-      }
+      setFieldError(key, field, error);
       return !error;
     },
-    [getMergedValidators, setFieldErrors, clearFieldError]
+    [resolveKey, setFieldError]
   );
 
-  /**
-   * Generate all props for a field in one call
-   * Usage: <input {...fieldProps('email')} />
-   * With rules: <input {...fieldProps('email', { rules: fn })} />
-   * Override: <input {...fieldProps('email', { onBlur: undefined })} />
-   */
-  const fieldProps = useCallback(
-    (field, overrides = {}) => {
-      // Register field-level rules if provided
-      if (overrides.rules) {
-        fieldRulesRef.current[field] = overrides.rules;
-      }
-      const restOverrides = { ...overrides };
-      delete restOverrides.rules;
-      return {
-        value: stepData[field] || '',
-        onChange: handleChange(field),
-        onBlur: validateField(field),
-        className: errors[field] ? 'error' : '',
-        ...restOverrides,
-      };
-    },
-    [stepData, handleChange, validateField, errors]
-  );
-
-  /**
-   * Validate all fields using merged validators (global + field-level rules)
-   */
-  const mergedValidateStep = useCallback(formData => {
-    const merged = getMergedValidators();
+  /** Validate all fields for the current step */
+  const validateStep = useCallback(() => {
+    const key = resolveKey();
+    const rules = fieldRulesRef.current[key] || {};
     const newErrors = {};
-    Object.keys(merged).forEach(field => {
-      const error = merged[field](formData[field]);
+    Object.keys(rules).forEach(field => {
+      const error = rules[field](valuesRef.current[key]?.[field]);
       if (error) {
         newErrors[field] = error;
       }
     });
-    setErrors(newErrors);
+    setErrors(prev => ({ ...prev, [key]: newErrors }));
     return Object.keys(newErrors).length === 0;
-  }, [getMergedValidators, setErrors]);
+  }, [resolveKey]);
 
-  /**
-   * Navigate to next step (validates first)
-   */
+  // ─── Field Binding ───────────────────────────────────────────
+
+  /** Generate all props for a field in one call (uncontrolled) */
+  const fieldProps = useCallback(
+    (field, overrides = {}) => {
+      const {
+        rules,
+        validateOnBlur: fieldValidateOnBlur,
+        ...restOverrides
+      } = overrides;
+      const shouldValidateOnBlur =
+        fieldValidateOnBlur ?? validateOnBlurRef.current;
+
+      // Register field-level rules if provided
+      if (rules) {
+        fieldRulesRef.current[currentKey] = {
+          ...fieldRulesRef.current[currentKey],
+          [field]: rules,
+        };
+      }
+
+      const inputKey = `${currentKey}.${field}`;
+      return {
+        ref: el => {
+          inputRefs.current[inputKey] = el;
+        },
+        defaultValue: valuesRef.current[currentKey]?.[field] ?? '',
+        onChange: handleChange(field),
+        onBlur: shouldValidateOnBlur ? validateField(field) : undefined,
+        className: errors[currentKey]?.[field] ? 'error' : '',
+        ...restOverrides,
+      };
+    },
+    [currentKey, handleChange, validateField, errors]
+  );
+
+  /** Watch a field — returns current value and triggers re-render on change */
+  const watch = useCallback(
+    field => {
+      const inputKey = `${currentKey}.${field}`;
+      watchedFieldsRef.current.add(inputKey);
+      return valuesRef.current[currentKey]?.[field];
+    },
+    [currentKey]
+  );
+
+  // ─── Navigation (wraps useStepNavigation with validation) ────
+
+  /** Navigate to next step (validates first) */
   const goToNext = useCallback(
     targetStep => {
-      if (mergedValidateStep(stepData)) {
-        const next = targetStep ?? stepNumber + 1;
-        dispatch(goToStep(next));
+      if (validateStep()) {
+        const next = targetStep ?? currentStepRef.current + 1;
+        if (rawGoTo(next)) {
+          watchedFieldsRef.current.clear();
+        }
         return true;
       }
       return false;
     },
-    [dispatch, stepNumber, stepData, mergedValidateStep]
+    [validateStep, rawGoTo, currentStepRef]
   );
 
-  /**
-   * Navigate to previous step
-   */
+  /** Navigate to previous step */
   const goToPrev = useCallback(() => {
-    if (stepNumber > 0) {
-      dispatch(goToStep(stepNumber - 1));
+    if (rawGoTo(currentStepRef.current - 1)) {
+      watchedFieldsRef.current.clear();
     }
-  }, [dispatch, stepNumber]);
+  }, [rawGoTo, currentStepRef]);
 
-  /**
-   * Navigate to a specific step
-   */
+  /** Navigate to a specific step */
   const goTo = useCallback(
-    targetStep => {
-      dispatch(goToStep(targetStep));
+    step => {
+      if (rawGoTo(step)) {
+        watchedFieldsRef.current.clear();
+      }
     },
-    [dispatch]
+    [rawGoTo]
   );
+
+  // ─── Reset ───────────────────────────────────────────────────
+
+  /** Reset entire form to initial state */
+  const reset = useCallback(() => {
+    navReset();
+    const fresh = {};
+    Object.keys(initialDataRef.current).forEach(key => {
+      fresh[key] = { ...initialDataRef.current[key] };
+    });
+    valuesRef.current = fresh;
+    setErrors({});
+    fieldRulesRef.current = {};
+    watchedFieldsRef.current.clear();
+
+    // Reset DOM inputs to initial values
+    Object.entries(inputRefs.current).forEach(([inputKey, el]) => {
+      if (el) {
+        const [stepKey, field] = inputKey.split('.');
+        el.value = initialDataRef.current[stepKey]?.[field] ?? '';
+      }
+    });
+    inputRefs.current = {};
+  }, [navReset]);
+
+  /** Reset a single step to its initial state */
+  const resetStep = useCallback(
+    step => {
+      const key = resolveKey(step);
+
+      // Reset values for this step only
+      valuesRef.current[key] = { ...initialDataRef.current[key] };
+
+      // Clear errors for this step only
+      setErrors(prev => {
+        if (!prev[key]) return prev;
+        const { [key]: _, ...rest } = prev;
+        return rest;
+      });
+
+      // Reset DOM inputs for this step only
+      const prefix = `${key}.`;
+      Object.entries(inputRefs.current).forEach(([inputKey, el]) => {
+        if (el && inputKey.startsWith(prefix)) {
+          const field = inputKey.slice(prefix.length);
+          el.value = initialDataRef.current[key]?.[field] ?? '';
+        }
+      });
+
+      // Re-render so watched fields pick up reset values
+      forceRender();
+    },
+    [resolveKey]
+  );
+
+  // ─── Snapshots & Return ──────────────────────────────────────
+  const stepData = valuesRef.current[currentKey] || {};
+  const stepErrors = errors[currentKey] || {};
+  const formData = valuesRef.current;
 
   return {
     // State
+    currentStep,
+    currentKey,
     stepData,
+    stepErrors,
+    formData,
     errors,
 
     // Handlers
@@ -176,11 +333,14 @@ export const useStepForm = (stepNumber, validators = {}, stepData = {}) => {
     goToNext,
     goToPrev,
     goTo,
+    reset,
+    resetStep,
+    getFieldValue,
+    getValues,
+    watch,
 
     // Validation helpers
-    validateStep: () => mergedValidateStep(stepData),
-    clearFieldError,
-    hasErrors,
+    validateStep,
   };
 };
 

@@ -1,80 +1,64 @@
-import { useSelector } from 'react-redux';
 import FormItem from './FormItem';
-import { useStepForm } from '../../hooks/useStepForm';
-
-const validators = {
-  province: value => {
-    if (!value) return '请输入省份';
-    return null;
-  },
-  city: value => {
-    if (!value) return '请输入城市';
-    return null;
-  },
-  street: value => {
-    if (!value) return '请输入街道地址';
-    return null;
-  },
-  zipCode: value => {
-    if (value && !/^\d{6}$/.test(value)) {
-      return '请输入6位数字邮编';
-    }
-    return null;
-  },
-};
+import { useFormContext } from '../../hooks';
 
 const Step2 = () => {
-  const stepData = useSelector(state => state.form.formData.step2);
-  const { errors, handleChange, goToNext, goToPrev } = useStepForm(
-    2,
-    validators,
-    stepData
-  );
+  const { stepData, stepErrors, fieldProps, goToNext, goToPrev } =
+    useFormContext();
 
   return (
     <div className="step-content">
       <h2>地址信息</h2>
 
       <div className="form-grid">
-        <FormItem label="省份" required error={errors.province}>
+        <FormItem label="省份" required error={stepErrors.province}>
           <input
             type="text"
-            value={stepData.province || ''}
-            onChange={handleChange('province')}
-            className={errors.province ? 'error' : ''}
+            {...fieldProps('province', {
+              rules: value => {
+                if (!value) return '请输入省份';
+              },
+            })}
           />
         </FormItem>
 
-        <FormItem label="城市" required error={errors.city}>
+        <FormItem label="城市" required error={stepErrors.city}>
           <input
             type="text"
-            value={stepData.city || ''}
-            onChange={handleChange('city')}
-            className={errors.city ? 'error' : ''}
+            {...fieldProps('city', {
+              rules: value => {
+                if (!value) return '请输入城市';
+              },
+            })}
           />
         </FormItem>
 
-        <FormItem label="街道地址" required error={errors.street}>
+        <FormItem label="街道地址" required error={stepErrors.street}>
           <input
             type="text"
-            value={stepData.street || ''}
-            onChange={handleChange('street')}
-            className={errors.street ? 'error' : ''}
+            {...fieldProps('street', {
+              rules: value => {
+                if (!value) return '请输入街道地址';
+              },
+            })}
           />
         </FormItem>
 
-        <FormItem label="邮政编码" error={errors.zipCode}>
+        <FormItem label="邮政编码" error={stepErrors.zipCode}>
           <input
             type="text"
-            value={stepData.zipCode || ''}
-            onChange={handleChange('zipCode')}
-            className={errors.zipCode ? 'error' : ''}
+            {...fieldProps('zipCode', {
+              rules: value => {
+                if (value && !/^\d{6}$/.test(value)) {
+                  return '请输入6位数字邮编';
+                }
+              },
+            })}
           />
         </FormItem>
       </div>
 
       <div className="redux-debug-panel">
-        <strong>当前 Redux 数据：</strong>
+        <strong>当前数据：</strong>
         <pre>{JSON.stringify(stepData, null, 2)}</pre>
       </div>
 

@@ -1,5 +1,4 @@
-import { useSelector, useDispatch } from 'react-redux';
-import { goToStep } from '../../store/formSlice';
+import { useFormContext } from '../../hooks';
 
 const STEPS = [
   { number: 0, title: '个人信息' },
@@ -9,12 +8,7 @@ const STEPS = [
 ];
 
 const StepIndicator = () => {
-  const dispatch = useDispatch();
-  const currentStep = useSelector(state => state.form.currentStep);
-
-  const handleStepClick = (step) => {
-    dispatch(goToStep(step));
-  };
+  const { currentStep, goTo } = useFormContext();
 
   return (
     <div className="step-indicator">
@@ -22,14 +16,16 @@ const StepIndicator = () => {
         <div key={step.number} className="step-indicator-item">
           <div
             className={`step-circle ${currentStep >= step.number ? 'active' : ''} ${currentStep > step.number ? 'completed' : ''}`}
-            onClick={() => handleStepClick(step.number)}
+            onClick={() => goTo(step.number)}
             style={{ cursor: 'pointer' }}
           >
             {currentStep > step.number ? '✓' : step.number + 1}
           </div>
           <span className="step-title">{step.title}</span>
           {index < STEPS.length - 1 && (
-            <div className={`step-line ${currentStep > step.number ? 'completed' : ''}`}></div>
+            <div
+              className={`step-line ${currentStep > step.number ? 'completed' : ''}`}
+            ></div>
           )}
         </div>
       ))}

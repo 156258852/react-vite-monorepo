@@ -23,7 +23,10 @@ const formSlice = createSlice({
     // 更新整个步骤数据（批量）
     updateStepData: (state, action) => {
       const { step, data } = action.payload;
-      state.formData[`step${step}`] = { ...state.formData[`step${step}`], ...data };
+      state.formData[`step${step}`] = {
+        ...state.formData[`step${step}`],
+        ...data,
+      };
     },
 
     // 步骤导航
@@ -33,8 +36,16 @@ const formSlice = createSlice({
 
     // 重置表单
     resetForm: () => initialState,
+
+    // 从外部同步整个表单状态
+    syncForm: (state, action) => {
+      const { formData, currentStep } = action.payload;
+      state.formData = formData;
+      state.currentStep = currentStep;
+    },
   },
 });
 
-export const { updateField, updateStepData, goToStep, resetForm } = formSlice.actions;
+export const { updateField, updateStepData, goToStep, resetForm, syncForm } =
+  formSlice.actions;
 export default formSlice.reducer;
