@@ -3,9 +3,23 @@ import { useForceUpdate } from './useForceUpdate';
 import { useStepNavigation } from './useStepNavigation';
 
 /**
+ * Set a DOM input's value (handles checkbox via .checked)
+ */
+const setDOMValue = (el, value) => {
+  if (el.type === 'checkbox') {
+    el.checked = value;
+  } else {
+    el.value = value;
+  }
+};
+
+/**
  * Custom hook for step form (uncontrolled)
  * Values stored in refs — no re-render on every keystroke
  * Use watch(field) for values that drive UI (conditional rendering)
+ *
+ * Validation rules can be sync (return string | null) or async (return Promise<string | null>).
+ * validateField / validateStep / goToNext all return Promises.
  *
  * @param {Object} options - Configuration
  * @param {number} [options.totalSteps] - Total number of steps (generates step0, step1, ...)
@@ -34,7 +48,7 @@ export const useStepForm = (options = {}) => {
   const buildInitial = () => {
     const data = {};
     stepKeys.forEach(key => {
-      data[key] = { ...(initialData[key] || {}) };
+      data[key] = { ...(initialData[key] ?? {}) };
     });
     return data;
   };
@@ -53,9 +67,11 @@ export const useStepForm = (options = {}) => {
   // Errors namespaced by step key: { [stepKey]: { [field]: message } }
   const [errors, setErrors] = useState({});
 
-  // Form values (ref = no re-render on change)
-  const valuesRef = useRef(buildInitial());
-  const initialDataRef = useRef(buildInitial());
+  // Form values (ref = no re-render on change) — lazy init to avoid re-computing on every render
+  const valuesRef = useRef(null);
+  if (valuesRef.current === null) valuesRef.current = buildInitial();
+  const initialDataRef = useRef(null);
+  if (initialDataRef.current === null) initialDataRef.current = buildInitial();
 
   // DOM input refs for programmatic updates
   const inputRefs = useRef({});
@@ -72,6 +88,9 @@ export const useStepForm = (options = {}) => {
   stepKeysRef.current = stepKeys;
   const validateOnBlurRef = useRef(validateOnBlur);
   validateOnBlurRef.current = validateOnBlur;
+
+  // Async validation race condition guard (per-field latest-wins)
+  const validationCounterRef = useRef({});
 
   // ─── Internal Helpers ────────────────────────────────────────
 
@@ -107,27 +126,34 @@ export const useStepForm = (options = {}) => {
 
   /** Set a field's value (updates ref + DOM, no re-render unless watched) */
   const setFieldValue = useCallback(
-    (field, value) => {
-      const key = resolveKey();
+    (field, value, step) => {
+      const key = resolveKey(step);
       valuesRef.current[key] = { ...valuesRef.current[key], [field]: value };
 
       // Update DOM input if mounted
       const inputKey = `${key}.${field}`;
       const el = inputRefs.current[inputKey];
-      if (el) el.value = value;
+      if (el) setDOMValue(el, value);
 
       // Re-render if field is watched
       if (watchedFieldsRef.current.has(inputKey)) {
         forceRender();
       }
 
-      // Clear error if field is now valid
+      // Clear error if field is now valid (supports async rules)
       const rule = fieldRulesRef.current[key]?.[field];
-      if (rule && !rule(value)) {
-        setFieldError(key, field, null);
+      if (rule) {
+        const counterKey = `${key}.${field}`;
+        const counters = validationCounterRef.current;
+        const requestId = (counters[counterKey] =
+          (counters[counterKey] || 0) + 1);
+        Promise.resolve(rule(value)).then(error => {
+          if (requestId !== counters[counterKey]) return;
+          setFieldError(key, field, error);
+        });
       }
     },
-    [resolveKey, setFieldError]
+    [resolveKey, setFieldError, forceRender]
   );
 
   /** Convenience wrapper: extracts value from native inputs */
@@ -147,35 +173,113 @@ export const useStepForm = (options = {}) => {
 
   // ─── Validation ──────────────────────────────────────────────
 
-  /** Validate a single field and set/clear its error. Curried: validateField('email')() */
+  /**
+   * Validate a single field and set/clear its error.
+   * Curried: validateField('email')()
+   * Supports async rules — returns Promise<boolean>.
+   * Latest-wins: stale async results are discarded.
+   */
   const validateField = useCallback(
-    field => () => {
+    field => async () => {
       const key = resolveKey();
       const rule = fieldRulesRef.current[key]?.[field];
       if (!rule) return true;
 
       const value = valuesRef.current[key]?.[field];
-      const error = rule(value);
+
+      // Per-field race guard: increment counter, only apply result if still latest
+      const counterKey = `${key}.${field}`;
+      const counters = validationCounterRef.current;
+      const requestId = (counters[counterKey] =
+        (counters[counterKey] || 0) + 1);
+      const error = await rule(value);
+      if (requestId !== counters[counterKey]) return !error;
+
       setFieldError(key, field, error);
       return !error;
     },
     [resolveKey, setFieldError]
   );
 
-  /** Validate all fields for the current step */
-  const validateStep = useCallback(() => {
+  /**
+   * Validate all fields for the current step.
+   * Supports async rules.
+   * @returns Promise<{ values, errors? }> — errors only present when validation fails
+   */
+  const validateStep = useCallback(async () => {
     const key = resolveKey();
     const rules = fieldRulesRef.current[key] || {};
-    const newErrors = {};
-    Object.keys(rules).forEach(field => {
-      const error = rules[field](valuesRef.current[key]?.[field]);
-      if (error) {
-        newErrors[field] = error;
-      }
+
+    // Run all field rules in parallel
+    const entries = Object.keys(rules).map(async field => {
+      const error = await rules[field](valuesRef.current[key]?.[field]);
+      return [field, error];
     });
-    setErrors(prev => ({ ...prev, [key]: newErrors }));
-    return Object.keys(newErrors).length === 0;
+    const results = await Promise.all(entries);
+
+    const newErrors = {};
+    results.forEach(([field, error]) => {
+      if (error) newErrors[field] = error;
+    });
+
+    // Merge per-field rather than overwrite entire step, avoids clobbering
+    // in-flight async results from setFieldValue
+    setErrors(prev => {
+      const prevStep = prev[key] || {};
+      const merged = { ...prevStep };
+      // Clear fields that passed, set fields that failed
+      Object.keys(rules).forEach(field => {
+        if (newErrors[field]) {
+          merged[field] = newErrors[field];
+        } else {
+          delete merged[field];
+        }
+      });
+      return { ...prev, [key]: merged };
+    });
+
+    const result = { values: valuesRef.current[key] };
+    if (Object.keys(newErrors).length > 0) result.errors = newErrors;
+    return result;
   }, [resolveKey]);
+
+  /**
+   * Validate all steps at once.
+   * @returns Promise<{ values, errors? }> — errors only present when any step fails
+   */
+  const validateAll = useCallback(async () => {
+    const allErrors = {};
+    const allValues = {};
+
+    const results = await Promise.all(
+      stepKeysRef.current.map(async key => {
+        const rules = fieldRulesRef.current[key] || {};
+        const entries = Object.keys(rules).map(async field => {
+          const error = await rules[field](valuesRef.current[key]?.[field]);
+          return [field, error];
+        });
+        const fieldResults = await Promise.all(entries);
+        const stepErrors = {};
+        fieldResults.forEach(([field, error]) => {
+          if (error) stepErrors[field] = error;
+        });
+        return [key, stepErrors];
+      })
+    );
+
+    let hasErrors = false;
+    results.forEach(([key, stepErrors]) => {
+      allErrors[key] = stepErrors;
+      allValues[key] = valuesRef.current[key];
+      if (Object.keys(stepErrors).length > 0) hasErrors = true;
+    });
+
+    setErrors(allErrors);
+
+    const result = { values: allValues };
+    if (hasErrors) result.errors = allErrors;
+    return result;
+  }, []);
 
   // ─── Field Binding ───────────────────────────────────────────
 
@@ -199,11 +303,16 @@ export const useStepForm = (options = {}) => {
       }
 
       const inputKey = `${currentKey}.${field}`;
+      const initialValue = valuesRef.current[currentKey]?.[field] ?? '';
+      const isCheckbox = restOverrides.type === 'checkbox';
       return {
         ref: el => {
+          if (inputRefs.current[inputKey] === el) return;
           inputRefs.current[inputKey] = el;
         },
-        defaultValue: valuesRef.current[currentKey]?.[field] ?? '',
+        ...(isCheckbox
+          ? { defaultChecked: !!initialValue }
+          : { defaultValue: initialValue }),
         onChange: handleChange(field),
         onBlur: shouldValidateOnBlur ? validateField(field) : undefined,
         className: errors[currentKey]?.[field] ? 'error' : '',
@@ -225,17 +334,22 @@ export const useStepForm = (options = {}) => {
 
   // ─── Navigation (wraps useStepNavigation with validation) ────
 
-  /** Navigate to next step (validates first) */
+  /**
+   * Navigate to next step (validates first).
+   * Returns Promise<boolean> — true only if validation passed AND navigation happened.
+   * Returns false at boundary (last step) even if validation passed.
+   */
   const goToNext = useCallback(
-    targetStep => {
-      if (validateStep()) {
-        const next = targetStep ?? currentStepRef.current + 1;
-        if (rawGoTo(next)) {
-          watchedFieldsRef.current.clear();
-        }
-        return true;
+    async targetStep => {
+      const { errors } = await validateStep();
+      if (errors) return false;
+
+      const next = targetStep ?? currentStepRef.current + 1;
+      const moved = rawGoTo(next);
+      if (moved) {
+        watchedFieldsRef.current.clear();
       }
-      return false;
+      return moved;
     },
     [validateStep, rawGoTo, currentStepRef]
   );
@@ -270,12 +384,15 @@ export const useStepForm = (options = {}) => {
     setErrors({});
     fieldRulesRef.current = {};
     watchedFieldsRef.current.clear();
+    validationCounterRef.current = {};
 
     // Reset DOM inputs to initial values
     Object.entries(inputRefs.current).forEach(([inputKey, el]) => {
       if (el) {
-        const [stepKey, field] = inputKey.split('.');
-        el.value = initialDataRef.current[stepKey]?.[field] ?? '';
+        const dotIdx = inputKey.indexOf('.');
+        const stepKey = inputKey.slice(0, dotIdx);
+        const field = inputKey.slice(dotIdx + 1);
+        setDOMValue(el, initialDataRef.current[stepKey]?.[field] ?? '');
       }
     });
     inputRefs.current = {};
@@ -301,14 +418,20 @@ export const useStepForm = (options = {}) => {
       Object.entries(inputRefs.current).forEach(([inputKey, el]) => {
         if (el && inputKey.startsWith(prefix)) {
           const field = inputKey.slice(prefix.length);
-          el.value = initialDataRef.current[key]?.[field] ?? '';
+          setDOMValue(el, initialDataRef.current[key]?.[field] ?? '');
         }
+      });
+
+      // Invalidate in-flight async validations for this step
+      const counters = validationCounterRef.current;
+      Object.keys(counters).forEach(k => {
+        if (k.startsWith(prefix)) counters[k]++;
       });
 
       // Re-render so watched fields pick up reset values
       forceRender();
     },
-    [resolveKey]
+    [resolveKey, forceRender]
   );
 
   // ─── Snapshots & Return ──────────────────────────────────────
@@ -341,6 +464,7 @@ export const useStepForm = (options = {}) => {
 
     // Validation helpers
     validateStep,
+    validateAll,
   };
 };
 
